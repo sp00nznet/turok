@@ -1,0 +1,36 @@
+# Turok (Xbox 360, 2008) - ReXGlue Configuration
+# Propaganda Games / Touchstone / Disney Interactive
+
+project_name = "turok"
+file_path = "../game_files/default.xex"
+out_directory_path = "../generated"
+
+# Code generation options (conservative for initial pass)
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+cr_as_local = false
+reserved_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+generate_exception_handlers = false
+
+# ABI helper function addresses (found via binary analysis)
+savegprlr_14_address = 0x8281DFE0
+restgprlr_14_address = 0x8281E030
+savefpr_14_address = 0x82A5D630
+restfpr_14_address = 0x82A5D67C
+savevmx_14_address = 0x82A613E0
+restvmx_14_address = 0x82A61678
+
+[analysis]
+max_jump_extension = 65536
+
+# Manual function overrides for unresolved branch targets
+[functions]
+0x828720E4 = { size = 60 }    # tail-call target from 0x82872124
+0x829D29E0 = { size = 52 }    # tail-call target from 0x829D2E34
+0x8283C95C = { size = 12 }    # tail-call target from 0x8283C96C
+0x829CF5A8 = { size = 24 }    # tail-call target from 0x829D041C
+0x828692B8 = { size = 172 }   # tail-call target from 0x82A70FA8

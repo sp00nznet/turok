@@ -1,0 +1,30 @@
+# Game files (user-supplied)
+*.iso
+*.zip
+*.rar
+game_files/
+extracted/
+pe_image.bin
+
+# Generated code (from rexglue codegen)
+generated/
+
+# Build output
+project/out/
+project/build/
+*.exe
+*.obj
+*.pdb
+*.ilk
+
+# Logs
+*.log
+
+# Editor
+.vs/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
