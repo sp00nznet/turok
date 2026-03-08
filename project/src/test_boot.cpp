@@ -5,11 +5,18 @@
 
 #include <rex/runtime.h>
 #include <rex/runtime/guest/memory.h>
+#include <rex/runtime/export_resolver.h>
+#include <rex/kernel/xmemory.h>
+#include <rex/memory/utils.h>
+#include <rex/graphics/graphics_system.h>
+#include <rex/graphics/register_file.h>
 #include <rex/logging.h>
 #include <rex/cvar.h>
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -162,10 +169,58 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[test] Boot test PASSED - XEX loaded successfully!\n");
     fflush(stderr);
 
+    // VdGlobalDevice diagnostic
+    uint32_t vd_guest_addr = 0;
+    {
+        auto* entry = runtime->export_resolver()->GetExportByOrdinal("xboxkrnl.exe", 0x1be);
+        if (entry) {
+            vd_guest_addr = entry->variable_ptr;
+            fprintf(stderr, "[test] VdGlobalDevice variable_ptr = 0x%08X\n", vd_guest_addr);
+        }
+    }
+
     auto thread = runtime->LaunchModule();
     if (thread) {
         fprintf(stderr, "[test] Module launched, waiting...\n");
         fflush(stderr);
+
+        // Diagnostic: poll GPU registers and VdGlobalDevice
+        {
+            auto* gs = runtime->graphics_system();
+            auto* rf = gs ? gs->register_file() : nullptr;
+            std::thread([&runtime, rf, vd_guest_addr]() {
+                for (int i = 0; i < 15; i++) {
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    fprintf(stderr, "[diag] t+%ds:", (i+1)*2);
+                    if (rf) {
+                        // RB_SURFACE_INFO = 0x2000, RB_MODECONTROL = 0x2001
+                        // PA_SC_WINDOW_OFFSET = 0x2080
+                        // PA_SC_WINDOW_SCISSOR_TL = 0x2081
+                        // PA_SC_WINDOW_SCISSOR_BR = 0x2082
+                        // RB_COLOR_INFO = 0x2004
+                        // SQ_PROGRAM_CNTL = 0x2180
+                        fprintf(stderr, " RB_SURFACE_INFO[0x2000]=0x%08X"
+                                        " RB_MODECONTROL[0x2001]=0x%08X"
+                                        " RB_COLOR_INFO[0x2004]=0x%08X"
+                                        " PA_SC_SCISSOR_TL[0x2081]=0x%08X"
+                                        " PA_SC_SCISSOR_BR[0x2082]=0x%08X"
+                                        " SQ_PROGRAM[0x2180]=0x%08X",
+                                rf->values[0x2000], rf->values[0x2001],
+                                rf->values[0x2004],
+                                rf->values[0x2081], rf->values[0x2082],
+                                rf->values[0x2180]);
+                    }
+                    if (vd_guest_addr) {
+                        uint32_t val = rex::memory::load_and_swap<uint32_t>(
+                            runtime->memory()->TranslateVirtual(vd_guest_addr));
+                        fprintf(stderr, " VdGlobalDevice=0x%08X", val);
+                    }
+                    fprintf(stderr, "\n");
+                    fflush(stderr);
+                }
+            }).detach();
+        }
+
         thread->Wait(0, 0, 0, nullptr);
     }
 

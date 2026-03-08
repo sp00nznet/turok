@@ -10,6 +10,9 @@
 #include <rex/filesystem.h>
 #include <rex/runtime.h>
 #include <rex/runtime/guest/memory.h>
+#include <rex/runtime/export_resolver.h>
+#include <rex/kernel/xmemory.h>
+#include <rex/memory/utils.h>
 #include <rex/logging.h>
 #include <rex/kernel/xthread.h>
 #include <rex/kernel/kernel_state.h>
@@ -33,6 +36,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <tlhelp32.h>
 #include <cstdio>
 #include <csignal>
 #include <cstdlib>
@@ -313,16 +317,15 @@ public:
         REXCVAR_SET(draw_resolution_scale_x, settings_.draw_resolution_scale_x);
         REXCVAR_SET(draw_resolution_scale_y, settings_.draw_resolution_scale_y);
         REXCVAR_SET(vsync, settings_.vsync);
+        REXCVAR_SET(gpu_allow_invalid_fetch_constants, true);
 
         ApplyConsoleVisibility(settings_.show_console);
 
         std::string log_file_cvar = REXCVAR_GET(log_file);
-        std::string log_level_str = REXCVAR_GET(log_level);
-        if (REXCVAR_GET(log_verbose) && log_level_str == "info") {
-            log_level_str = "trace";
-        }
+        if (log_file_cvar.empty()) log_file_cvar = "turok.log";
+        std::string log_level_str = "trace";
         auto log_config = rex::BuildLogConfig(
-            log_file_cvar.empty() ? nullptr : log_file_cvar.c_str(),
+            log_file_cvar.c_str(),
             log_level_str, {});
         rex::InitLogging(log_config);
         rex::RegisterLogLevelCallback();
@@ -349,6 +352,14 @@ public:
         if (XFAILED(status)) {
             REXLOG_ERROR("Failed to load XEX: {:08X}", status);
             return false;
+        }
+
+        // Log VdGlobalDevice address for diagnostics
+        {
+            auto* entry = runtime_->export_resolver()->GetExportByOrdinal("xboxkrnl.exe", 0x1be);
+            if (entry) {
+                REXLOG_INFO("VdGlobalDevice variable_ptr = 0x{:08X}", entry->variable_ptr);
+            }
         }
 
         window_ = rex::ui::Window::Create(app_context(), "Turok", 1280, 720);
@@ -398,6 +409,44 @@ public:
                 w->SetFullscreen(true);
             });
         }
+
+        // Patch: force-set the UE3 "game running" flag after init completes.
+        // Address 0x83494428 (base 0x83490000 + offset 17448) controls whether
+        // GEngineLoop.Tick() runs the main simulation or skips it entirely.
+        std::thread([this]() {
+            uint8_t* base = (uint8_t*)runtime_->memory()->virtual_membase();
+            constexpr uint32_t FLAG_ADDR = 0x83490000u + 17448u;  // 0x83494428
+
+            REXLOG_ERROR("[TUROK-PATCH] Patcher thread started, base={:X}", (uintptr_t)base);
+
+            // Wait for the game init to progress enough
+            // Poll every 100ms, check for VdSwap having occurred (init done)
+            for (int i = 0; i < 300; i++) {
+                Sleep(100);
+                volatile uint32_t* flag = (volatile uint32_t*)(base + FLAG_ADDR);
+                uint32_t val = __builtin_bswap32(*flag);
+                if (i < 5 || (i % 50 == 0)) {
+                    REXLOG_ERROR("[TUROK-PATCH] poll#{}: flag@{:08X} = {}", i, FLAG_ADDR, val);
+                }
+                if (i >= 5 && val == 0) {
+                    // Also zero out the tick counter and max-tick-count on GEngineLoop
+                    // to prevent immediate exit when we enable the game simulation.
+                    // GEngineLoop is at 0x83490000+30632 = 0x834977A8
+                    constexpr uint32_t ENGINE_LOOP = 0x834977A8u;
+                    volatile uint32_t* tickCount = (volatile uint32_t*)(base + ENGINE_LOOP + 20);
+                    volatile uint32_t* maxTicks  = (volatile uint32_t*)(base + ENGINE_LOOP + 24);
+                    REXLOG_ERROR("[TUROK-PATCH] tickCount={} maxTicks={} (pre-patch, BE)",
+                        __builtin_bswap32(*tickCount), __builtin_bswap32(*maxTicks));
+                    *tickCount = 0;  // Reset tick counter
+                    *maxTicks = 0;   // Disable max-tick exit condition
+
+                    // Now set the game-running flag
+                    *flag = __builtin_bswap32(1);
+                    REXLOG_ERROR("[TUROK-PATCH] Forced game-running flag at 0x{:08X} = 1 (after {}ms)", FLAG_ADDR, (i+1)*100);
+                    break;
+                }
+            }
+        }).detach();
 
         // Launch module
         app_context().CallInUIThreadDeferred([this]() {

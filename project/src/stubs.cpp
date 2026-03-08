@@ -5,6 +5,7 @@
 #include <rex/runtime/guest/context.h>
 #include <rex/runtime/guest/memory.h>
 #include <rex/kernel/kernel_state.h>
+#include <rex/kernel/xmemory.h>
 #include <cstring>
 
 using namespace rex::runtime::guest;
@@ -30,8 +31,21 @@ extern "C" PPC_FUNC(__imp__XamContentGetLicenseMask) {
     ctx.r3.u32 = 0;  // ERROR_SUCCESS
 }
 
-// Kernel memory allocation
-TUROK_STUB(__imp__ExAllocatePoolWithTag)
+// Kernel memory allocation - ExAllocatePoolWithTag(PoolType, NumberOfBytes, Tag)
+// PPC ABI: r3=PoolType, r4=Size, r5=Tag
+extern "C" PPC_FUNC(__imp__ExAllocatePoolWithTag) {
+    uint32_t size = ctx.r4.u32;
+    uint32_t alignment = 8;
+    uint32_t adjusted_size = size;
+    if (adjusted_size < 4096) {
+        adjusted_size = (adjusted_size + 4095) & ~4095u;
+    } else {
+        alignment = 4096;
+    }
+    auto* ks = rex::kernel::kernel_state();
+    uint32_t addr = ks->memory()->SystemHeapAlloc(adjusted_size, alignment);
+    ctx.r3.u64 = addr;
+}
 
 // ObReferenceObject
 TUROK_STUB(__imp__ObReferenceObject)
@@ -243,3 +257,5 @@ TUROK_STUB(__imp__XeKeysGetKey)
 // Misc
 TUROK_STUB(__imp__Refresh)
 TUROK_STUB(__imp__XexUnloadImageAndExitThread)
+
+// NOTE: Game-running flag patch is now done from main.cpp via polling thread
