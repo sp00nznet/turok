@@ -4,9 +4,13 @@ Native PC port of Turok (2008, Propaganda Games) via static recompilation. Power
 
 Built with [ReXGlue SDK](https://github.com/hedge-dev/ReXGlue) and [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
 
+## Screenshot
+
+![Turok Logo Loading Screen](images/logo-loading.png)
+
 ## Status
 
-**Foundation** - Binary extracted, codegen config ready, project scaffold complete.
+**Boots to loading screen** - Game initializes, renders logo and loading spinner. Settings UI and input bindings functional.
 
 ## Build
 
