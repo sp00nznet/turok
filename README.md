@@ -53,4 +53,6 @@ Keyboard + XInput controller (both work simultaneously).
 
 ## License
 
-Project scaffold and tools under MIT. Game assets belong to their respective owners.
+MIT: see [LICENSE](LICENSE). Game assets belong to their respective owners.
+The codegen output (`generated/`, step 3) is made on your machine from your own
+disc and is never committed.
